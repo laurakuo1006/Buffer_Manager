@@ -1,3 +1,14 @@
+/**
+ * @file buf.C
+ *
+ * This file contains the implementation of allocBuf, readPage, unPinPage, allocPage,
+ * which allows the buffer manager to allocate a page, read the content of a
+ * page, deallocate a page.
+ *
+ * @author Laura Kuo
+ * @studentID 9082113458
+ */
+
 #include <memory.h>
 #include <unistd.h>
 #include <errno.h>
