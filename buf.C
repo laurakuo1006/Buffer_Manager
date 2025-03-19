@@ -65,12 +65,45 @@ BufMgr::~BufMgr() {
 
 const Status BufMgr::allocBuf(int & frame) 
 {
+    int attempts = 0;
 
+    while (attempts--) {
+        advanceClock();
+        BufDesc &currFrame = bufTable[clockHand];
 
+        //if frame is available, return this frame        
+        if (!currFrame.valid) {
+            frame = clockHand
+            currFrame.Clear();
+            return OK
+        }
 
+        //if recently referenced, clear refbit and move to next frame
+        if (currFrame.refbit) {
+            currFrame.refbit = false;
+            continue;
+        } else {
+            if (currFrame.pinCnt > 0) {
+                continue;
+            } else {
+                if (currFrame.dirty) {
+                    Status rc = currFrame.file->writePage(currFrame.pageNo, &bufPool[clockHand]);
+                    
+                    if (rc == UNIXERR) {
+                        return UNIXERR
+                    }
+                }
 
+                hashTable->remove(currFrame.file, bufTable[clockHand].pageNo);
+                frame = clockHand;
+                currFrame.Clear();
 
+                return OK;
+            }
+        }
+    }
 
+    return BUFFEREXCEEDED;
 }
 
 	
