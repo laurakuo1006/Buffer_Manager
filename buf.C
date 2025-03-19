@@ -65,77 +65,136 @@ BufMgr::~BufMgr() {
 
 const Status BufMgr::allocBuf(int & frame) 
 {
-    int attempts = 0;
+    int attempts = numBufs;
 
     while (attempts--) {
-        advanceClock();
         BufDesc &currFrame = bufTable[clockHand];
 
         //if frame is available, return this frame        
         if (!currFrame.valid) {
-            frame = clockHand
+            frame = clockHand;
             currFrame.Clear();
-            return OK
+            advanceClock();
+            return OK;
         }
 
         //if recently referenced, clear refbit and move to next frame
         if (currFrame.refbit) {
             currFrame.refbit = false;
             continue;
-        } else {
-            if (currFrame.pinCnt > 0) {
-                continue;
-            } else {
-                if (currFrame.dirty) {
-                    Status rc = currFrame.file->writePage(currFrame.pageNo, &bufPool[clockHand]);
-                    
-                    if (rc == UNIXERR) {
-                        return UNIXERR
-                    }
+        } 
+
+        if (currFrame.pinCnt == 0) {
+            //write to memory if dirty
+            if (currFrame.dirty) {
+                Status rc = currFrame.file->writePage(currFrame.pageNo, &bufPool[clockHand]);
+                
+                if (rc == UNIXERR) {
+                    return UNIXERR;
                 }
-
-                hashTable->remove(currFrame.file, bufTable[clockHand].pageNo);
-                frame = clockHand;
-                currFrame.Clear();
-
-                return OK;
             }
+
+            //remove page from hashtable
+            hashTable->remove(currFrame.file, bufTable[clockHand].pageNo);
+            frame = clockHand;
+            currFrame.Clear();
+
+            return OK;
+        } else {
+            advanceClock();
         }
     }
 
+    //all pages are pinned
     return BUFFEREXCEEDED;
 }
 
 	
 const Status BufMgr::readPage(File* file, const int PageNo, Page*& page)
 {
+    int frameNo;
+    Status rc = hashTable->lookup(file, PageNo, frameNo);
 
+    //if page is already in buffer, increment pin count and set ref bit
+    if (rc == OK) {
+        bufTable[frameNo].pinCnt++;
+        bufTable[frameNo].refbit = true;
+        //assign address of page to pointer
+        page = &bufPool[frameNo];
 
+        return OK;
+    } 
+    
+    
+    //page is not in buffer, allocate a frame to the buffer
+    rc = allocBuf(frameNo);
+    //if successfuly allocated, insert page and set buffer descriptor
+    if (rc == OK) {
+        rc = file->readPage(PageNo, &bufPool[frameNo]);
+        if (rc == OK) {
+            rc = hashTable->insert(file, PageNo, frameNo);
+            bufTable[frameNo].Set(file, PageNo);
+            //assign address of page to pointer
+            page = &bufPool[frameNo];
+        }
+    }
 
-
-
+    return rc;
 }
 
 
 const Status BufMgr::unPinPage(File* file, const int PageNo, 
 			       const bool dirty) 
 {
+    int frameNo;
+    //lookup frame number of the file and page
+    Status rc = hashTable->lookup(file, PageNo, frameNo);
 
+    //return error if page not found
+    if (rc != OK) return HASHNOTFOUND;
 
+    BufDesc &currFrame = bufTable[frameNo];
 
+    //return error if page not pinned
+    if (currFrame.pinCnt <= 0) return PAGENOTPINNED;
 
+    //decrement pin count
+    currFrame.pinCnt--;
 
+    //set dirty bit if requested by user
+    if (dirty) {
+        currFrame.dirty = true;
+    }
+
+    return OK;
 }
 
 const Status BufMgr::allocPage(File* file, int& pageNo, Page*& page) 
 {
+    Status rc = file->allocatePage(pageNo);
 
+    //return error if failed to allocage page
+    if (rc != OK) return UNIXERR;
 
+    //allocate a frame
+    int frameNo;
+    rc = allocBuf(frameNo);
 
+    //return error if failed to allocate frame
+    if (rc != OK) return rc;
 
+    //insert page into frame
+    rc = hashTable->insert(file, pageNo, frameNo);
 
+    //return error if failed to insert page into frame
+    if (rc != OK) return HASHTBLERROR;
 
+    //set up buffer descriptor
+    bufTable[frameNo].Set(file, pageNo);
+    //assign address of page to pointer
+    page = &bufPool[frameNo];
 
+    return OK;
 }
 
 const Status BufMgr::disposePage(File* file, const int pageNo) 
