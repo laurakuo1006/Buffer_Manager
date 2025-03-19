@@ -7,6 +7,8 @@
  *
  * @author Laura Kuo
  * @studentID 9082113458
+ * @author Henry Pruski
+ * @studentID 9083254160
  */
 
 #include <memory.h>
